@@ -1,0 +1,30 @@
+{
+  "name": "ce-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Model Context Protocol server bridging any AI agent to Cheat Engine 7.x",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "stdio": "node dist/index.js --stdio",
+    "http": "node dist/index.js --http",
+    "status": "node dist/index.js --status",
+    "smoke": "node dist/index.js --smoke",
+    "probe": "node tools/probe.mjs",
+    "install-agent": "node tools/install-agent.mjs",
+    "uninstall-agent": "node tools/uninstall-agent.mjs",
+    "install-workbuddy": "node tools/install-workbuddy.mjs",
+    "uninstall-workbuddy": "node tools/install-workbuddy.mjs --remove"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
