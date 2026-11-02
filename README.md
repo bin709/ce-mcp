@@ -42,7 +42,7 @@ Agent ──MCP(stdio / HTTP 8770)──> ce-mcp(Node) ──文件信箱──>
 前提：Node ≥ 20，Cheat Engine 7.x 已安装。
 
 ```bash
-cd D:\农商\DSH\mcp\ce-mcp
+cd D:\tools\ce-mcp
 npm install
 npm run build
 
@@ -107,7 +107,7 @@ npm run install-workbuddy     # 备份并写入 ~/.workbuddy/connectors/default/
   "mcpServers": {
     "ce-mcp": {
       "command": "node",
-      "args": ["D:\\农商\\DSH\\mcp\\ce-mcp\\dist\\index.js", "--stdio"],
+      "args": ["D:\\tools\\ce-mcp\\dist\\index.js", "--stdio"],
       "env": {}
     }
   }
