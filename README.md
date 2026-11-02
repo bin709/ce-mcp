@@ -22,7 +22,6 @@ Agent ──MCP(stdio / HTTP 8770)──> ce-mcp(Node) ──文件信箱──>
 ## 目录
 
 ```
-ce-mcp/
 ├── agent/ce_mcp_agent.lua      CE 侧 agent（唯一需要放进 CE 的文件）
 ├── src/
 │   ├── index.ts                入口：--stdio / --http / --status / --smoke
