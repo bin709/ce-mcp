@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.backup/
+*.log
+*.tsbuildinfo
+.env
+token
