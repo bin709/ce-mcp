@@ -66,6 +66,18 @@ function parseFields(text: string): CeFields {
   return out;
 }
 
+/** 心跳文件由 agent 用普通字符串写入，不做反斜杠转义，因此不能解转义 */
+function parseRawFields(text: string): CeFields {
+  const out: CeFields = {};
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    out[line.slice(0, eq)] = line.slice(eq + 1);
+  }
+  return out;
+}
+
 export class CeBridge {
   private seq = 0;
   private chain: Promise<unknown> = Promise.resolve();
@@ -90,7 +102,7 @@ export class CeBridge {
     try {
       const st = statSync(hb);
       const ageMs = Date.now() - st.mtimeMs;
-      const fields = parseFields(readFileSync(hb, "utf8"));
+      const fields = parseRawFields(readFileSync(hb, "utf8"));
       return { alive: ageMs < 10_000, ageMs, fields };
     } catch {
       return { alive: false, ageMs: Infinity, fields: null };
