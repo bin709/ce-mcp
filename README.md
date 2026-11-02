@@ -2,7 +2,7 @@
 
 把 **Cheat Engine 7.x** 包装成一个 **MCP（Model Context Protocol）服务**，让任意 agent（WorkBuddy、Claude Desktop、Cursor、自研 agent……）通过标准 MCP 协议读写目标进程内存、反汇编、AOB 扫描、执行 Auto Assembler。
 
-**默认只开放只读工具**；写内存、执行代码、注入 DLL、变速全部需要显式开档。
+**默认全开**（读写内存、执行 Lua、注入 DLL、变速都直接可用）；想收紧就显式设 `CE_MCP_PROFILE=safe` 或 `standard`。
 
 ```
 Agent ──MCP(stdio / HTTP 8770)──> ce-mcp(Node) ──文件信箱──> ce_mcp_agent.lua(CE autorun)
@@ -109,7 +109,7 @@ npm run install-workbuddy     # 备份并写入 ~/.workbuddy/connectors/default/
     "ce-mcp": {
       "command": "node",
       "args": ["D:\\农商\\DSH\\mcp\\ce-mcp\\dist\\index.js", "--stdio"],
-      "env": { "CE_MCP_PROFILE": "safe" }
+      "env": {}
     }
   }
 }
@@ -153,9 +153,9 @@ npm run http
 
 | profile | 放行等级 | 适用 |
 | --- | --- | --- |
-| `safe`（默认） | read | 只看不改 |
+| `safe` | read | 只看不改 |
 | `standard` | + write | 需要改内存 |
-| `full` | + execute + danger | AA / Lua / 注入 / 变速 |
+| `full`（默认） | + execute + danger | AA / Lua / 注入 / 变速 |
 
 配置优先级：默认 < `~/.ce-mcp/config.json` < 环境变量 < 命令行参数。
 
@@ -176,7 +176,7 @@ CE_MCP_DENY=execute_lua ...
 
 - 双层闸门：Node 侧按 profile 拒绝，**agent 侧**对 `write/writetype/aa/lua/inject/speed` 二次校验 `gate=1`，绕过 MCP 直接写请求文件也改不了内存。
 - HTTP 只监听 `127.0.0.1`；设了 `CE_MCP_TOKEN` 之后必须带 `Authorization: Bearer <token>`。
-- 注意：CE 本身是以当前用户权限运行的，`execute_lua` 等价于本机执行代码 —— 只在你信任的 agent 上开 `full`。
+- 注意：CE 本身是以当前用户权限运行的，`execute_lua` 等价于本机执行代码。默认就是 `full`，如果你接的是不太信任的 agent，请改成 `safe` 或 `standard`。
 
 ## 故障排查
 

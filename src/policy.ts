@@ -1,9 +1,9 @@
 /**
  * 权限闸门：高危工具默认拒绝，只有 profile 放开或显式 allow 才放行。
  *
- *   safe     —— 只读（默认）
+ *   safe     —— 只读
  *   standard —— 只读 + 写内存
- *   full     —— 全开（含 AutoAssemble / 执行 Lua / 注入 DLL / 变速）
+ *   full     —— 全开（含 AutoAssemble / 执行 Lua / 注入 DLL / 变速）；默认档位
  */
 import type { Config, Profile } from "./config.js";
 

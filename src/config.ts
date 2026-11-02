@@ -10,7 +10,7 @@ export type Profile = "safe" | "standard" | "full";
 export interface Config {
   /** 本机信箱目录，必须和 CE 侧 agent 里的 IPC_DIR 一致 */
   ipcDir: string;
-  /** 默认 profile：safe 只读 / standard 可写 / full 全开 */
+  /** 默认 profile：full 全开（写内存/执行 Lua/注入 DLL/变速都默认允许） */
   profile: Profile;
   /** 额外放行的工具名（无视 profile） */
   allow: string[];
@@ -64,7 +64,7 @@ export function loadConfig(argv: string[]): Config {
   const file = readConfigFile();
   const cfg: Config = {
     ipcDir: file.ipcDir ?? DEFAULT_IPC,
-    profile: file.profile ?? "safe",
+    profile: file.profile ?? "full",
     allow: file.allow ?? [],
     deny: file.deny ?? [],
     httpPort: file.httpPort ?? 8770,
