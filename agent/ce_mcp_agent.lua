@@ -635,36 +635,90 @@ local function mainForm()
   return nil
 end
 
+-- ===== 主界面内嵌标识：底部 Panel4 条里的 MCP 三个字母（红/绿） =====
+-- TColor 是 0x00BBGGRR：绿 rgb(90,220,120) -> 0x78DC5A，红 rgb(255,95,95) -> 0x5F5FFF
+local GREEN_TEXT = 0x78DC5A
+local RED_TEXT = 0x5F5FFF
+local FLOATING_GREEN = 0x1F7A3D
+local FLOATING_RED = 0xB4232B
+local BUILD_DELAY_TICKS = 120 -- 等 ~3.6 秒，让 CE 把主窗体布局做完
+
+local function controlName(c)
+  local ok, v = pcall(function() return c.Name end)
+  if ok and v then return tostring(v) end
+  return ""
+end
+
+local function childCount(c)
+  local n = 0
+  pcall(function() n = c.ControlCount end)
+  if type(n) ~= "number" then n = 0 end
+  if n <= 0 then pcall(function() n = c.getControlCount() end) end
+  if type(n) ~= "number" then n = 0 end
+  return n
+end
+
+local function findChild(parent, name)
+  local n = childCount(parent)
+  for i = 0, n - 1 do
+    local c
+    pcall(function() c = parent.Control[i] end)
+    if c and controlName(c) == name then return c end
+  end
+  return nil
+end
+
+-- 主界面底部条是 Panel4，右侧那个按钮就是「表格附加功能」
+local function bottomBar()
+  local mf = mainForm()
+  if not mf then return nil, nil end
+  local panel = findChild(mf, "Panel4")
+  if not panel then return nil, nil end
+  return panel, findChild(panel, "CommentButton")
+end
+
 local function paint(online)
   if not UI.label then return end
-  if online then
-    UI.label.Caption = "MCP  ● 在线"
-    pcall(function() UI.form.RGBColor = 0x1F7A3D end)
+  if UI.mode == "inline" then
+    pcall(function() UI.label.Caption = "MCP " end)
+    pcall(function() UI.label.Font.Color = online and GREEN_TEXT or RED_TEXT end)
   else
-    UI.label.Caption = "MCP  ● 未连接"
-    pcall(function() UI.form.RGBColor = 0xB4232B end)
+    pcall(function() UI.label.Caption = online and "MCP  ● 在线" or "MCP  ● 未连接" end)
+    pcall(function() UI.form.RGBColor = online and FLOATING_GREEN or FLOATING_RED end)
+    pcall(function() UI.label.Font.Color = 0xFFFFFF end)
   end
-  pcall(function() UI.label.Font.Color = 0xFFFFFF end)
   if UI.online ~= online then
     UI.online = online
     log("mcp indicator: " .. (online and "online" or "offline"))
   end
 end
 
-local function placeBadge()
+local buildFloatingUi
+
+-- Panel4 是 AutoSize 的自动布局面板，手写坐标会被布局引擎覆盖；
+-- 用 Align=alRight 让 VCL 自己把它排到「表格附加功能」左边，缩放也跟着走。
+local function placeInline()
+  if UI.mode ~= "inline" or not UI.label then return end
+  local l, t, w, h = -1, -1, -1, -1
+  pcall(function() l, t, w, h = UI.label.Left, UI.label.Top, UI.label.Width, UI.label.Height end)
+  if l >= 90 and not UI.placedOnce then
+    UI.placedOnce = true
+    log(string.format("inline badge placed: rect=%d,%d %dx%d", l, t, w, h))
+  end
+end
+
+local function placeFloating()
   local mf = mainForm()
   if not mf or not UI.form then return end
-  local vis = true
-  pcall(function() vis = mf.Visible end)
   pcall(function()
+    local vis = mf.Visible
     UI.form.Visible = vis ~= false
     UI.form.Left = mf.Left + mf.Width - UI.form.Width - 26
     UI.form.Top = mf.Top + mf.Height - UI.form.Height - 48
   end)
 end
 
-function buildUi()
-  if UI.dead or UI.form then return end
+buildFloatingUi = function()
   local ok, e = pcall(function()
     local f = createForm(false)
     f.Caption = "ce-mcp"
@@ -672,7 +726,6 @@ function buildUi()
     f.Height = 22
     pcall(function() f.BorderStyle = "bsNone" end)
     pcall(function() f.FormStyle = "fsSystemStayOnTop" end)
-
     local l = createLabel(f)
     l.Left = 8
     l.Top = 4
@@ -685,24 +738,63 @@ function buildUi()
       l.Font.Style = "fsBold"
       l.Font.Color = 0xFFFFFF
     end)
-    pcall(function() l.Font.Color = 0xFFFFFF end)
-
     l.OnClick = function() togglePanel() end
-    UI.form, UI.label = f, l
+    UI.form, UI.label, UI.mode, UI.parent = f, l, "floating", "Form"
     f.Visible = true
   end)
   if not ok then
-    log("ui build failed: " .. tostring(e))
-    UI.attempts = UI.attempts + 1
-    if UI.attempts > 6 then
-      UI.dead = true
-      log("ui disabled (CE 版本不支持这些控件属性)")
-    end
-    UI.form = nil
+    log("floating ui failed: " .. tostring(e))
+    UI.form, UI.label = nil, nil
     return
   end
-  log("ui ready: 右下角指示灯")
-  UI.attempts = 0
+  log("ui ready: 右下角浮动指示灯")
+  paint(bridgeStatus())
+  placeFloating()
+end
+
+function buildUi()
+  if UI.dead then return end
+  if UI.label or UI.form then return end
+
+  local mf = mainForm()
+  if not mf then return end
+  local visible = false
+  pcall(function() visible = (mf.Visible == true) end)
+  if not visible then return end
+  if UI.attempts < BUILD_DELAY_TICKS then return end
+
+  local panel, comment = bottomBar()
+  if panel and comment then
+    local ok, e = pcall(function()
+      local l = createLabel(panel)
+      l.Caption = "MCP "
+      pcall(function() l.Transparent = true end)
+      pcall(function() l.Font.Style = "fsBold" end)
+      pcall(function() l.Font.Color = RED_TEXT end)
+      pcall(function() l.Layout = "tlCenter" end)
+      pcall(function() l.Alignment = "taCenter" end)
+      pcall(function() l.Cursor = "crHandPoint" end)
+      pcall(function() l.Hint = "ce-mcp 状态；点击查看接口清单" end)
+      pcall(function() l.ShowHint = true end)
+      l.OnClick = function() togglePanel() end
+      l.Align = "alRight" -- 交给 Panel4 的自动布局，排在「表格附加功能」左边
+      UI.label, UI.mode, UI.parent = l, "inline", "Panel4"
+    end)
+    if ok then
+      paint(bridgeStatus())
+      placeInline()
+      if UI.mode == "inline" then
+        log(string.format("ui ready: 底部条 MCP 标识 rect=%d,%d %dx%d",
+          UI.label.Left, UI.label.Top, UI.label.Width, UI.label.Height))
+      end
+      return
+    end
+    log("inline badge failed: " .. tostring(e))
+    UI.label, UI.mode, UI.parent = nil, nil, nil
+  else
+    log("bottomBar 未找到（Panel4/CommentButton），改用浮动指示灯")
+  end
+  buildFloatingUi()
 end
 
 function panelText()
@@ -730,7 +822,8 @@ function panelText()
     for i = 1, n do out[#out + 1] = "  " .. list[i] end
   end
   out[#out + 1] = ""
-  out[#out + 1] = "红色 = 服务端没连上；绿色 = 可用。本窗口可直接关掉。"
+  out[#out + 1] = "主界面底部「表格附加功能」左边的 MCP：字母绿色 = 服务端已连上；红色 = 没连上。"
+  out[#out + 1] = "点 MCP 三个字母可以随时调出这个窗口。"
   return table.concat(out, "\r\n")
 end
 
@@ -771,34 +864,42 @@ end
 
 function uiTick()
   if UI.dead then return end
-  if not UI.form then
-    -- MainForm 在 autorun 早期可能还不存在，前几秒反复重试
-    if UI.attempts > 400 then
+
+  local hasUi = (UI.label ~= nil) or (UI.form ~= nil)
+  if not hasUi then
+    UI.attempts = (UI.attempts or 0) + 1
+    if UI.attempts > 900 then
       UI.dead = true
       log("ui disabled: 等不到主窗口")
       return
     end
-    UI.attempts = UI.attempts + 1
     buildUi()
     return
   end
+
   if tickCount % 15 ~= 0 then return end -- ~450ms 刷新一次
-  local online = bridgeStatus()
-  paint(online)
-  placeBadge()
+  if not UI.label and not UI.form then return end
+  paint(bridgeStatus())
+  if UI.mode == "inline" then
+    placeInline()
+  elseif UI.form then
+    placeFloating()
+  end
 end
 
--- 调试用：返回指示灯的真实状态（probe 'return mcpUiDebug()' 可直接看到）
+-- 调试用：probe 'return mcpUiDebug()'
 function mcpUiDebug()
   local online, why = bridgeStatus()
-  if not UI.form then
-    return string.format("form=nil online=%s why=%s", tostring(online), tostring(why))
+  if not UI.label then
+    return string.format("label=nil mode=%s online=%s why=%s", tostring(UI.mode), tostring(online), tostring(why))
   end
-  local vis, l, t, w, h = "?", -1, -1, -1, -1
-  pcall(function() vis = tostring(UI.form.Visible) end)
-  pcall(function() l, t, w, h = UI.form.Left, UI.form.Top, UI.form.Width, UI.form.Height end)
-  local cap = "?"
-  pcall(function() cap = UI.label.Caption end)
-  return string.format("visible=%s rect=%d,%d %dx%d caption=%s online=%s why=%s panel=%s",
-    vis, l, t, w, h, cap, tostring(online), tostring(why), tostring(UI.panel ~= nil))
+  local l, t, w, h = -1, -1, -1, -1
+  pcall(function() l, t, w, h = UI.label.Left, UI.label.Top, UI.label.Width, UI.label.Height end)
+  local cap, col, vis, al = "?", "?", "?", "?"
+  pcall(function() cap = tostring(UI.label.Caption) end)
+  pcall(function() col = string.format("0x%06X", UI.label.Font.Color) end)
+  pcall(function() vis = tostring(UI.label.Visible) end)
+  pcall(function() al = tostring(UI.label.Align) end)
+  return string.format("mode=%s parent=%s align=%s rect=%d,%d %dx%d caption=%s color=%s visible=%s online=%s why=%s",
+    tostring(UI.mode), tostring(UI.parent), al, l, t, w, h, cap, col, vis, tostring(online), tostring(why))
 end
