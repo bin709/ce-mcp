@@ -13,6 +13,7 @@ import { loadConfig } from "./config.js";
 import { CeBridge } from "./ipc/client.js";
 import { Policy } from "./policy.js";
 import { TOOLS } from "./mcp/tools.js";
+import { startBridgeBeacon, writeToolsManifest } from "./ipc/beacon.js";
 import { createServer, SERVER_NAME, SERVER_VERSION } from "./mcp/server.js";
 
 const log = (msg: string): void => console.error(`[ce-mcp] ${msg}`);
@@ -21,6 +22,9 @@ async function runStdio(argv: string[]): Promise<void> {
   const config = loadConfig(argv);
   const { server, bridge } = createServer(config);
   bridge.sweep();
+  writeToolsManifest(config.ipcDir, TOOLS);
+  const stopBeacon = startBridgeBeacon(config.ipcDir, "stdio", TOOLS.length);
+  process.on("exit", stopBeacon);
   const hb = bridge.heartbeat();
   log(
     `stdio 模式启动，profile=${config.profile}，IPC=${config.ipcDir}，` +
@@ -33,6 +37,9 @@ async function runHttp(argv: string[]): Promise<void> {
   const config = loadConfig(argv);
   const bridge = new CeBridge(config.ipcDir, config.timeoutMs);
   bridge.sweep();
+  writeToolsManifest(config.ipcDir, TOOLS);
+  const stopBeacon = startBridgeBeacon(config.ipcDir, "http", TOOLS.length);
+  process.on("exit", stopBeacon);
 
   const http = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
@@ -113,8 +120,18 @@ async function runHttp(argv: string[]): Promise<void> {
     }
   });
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
+    http.once("error", (err: NodeJS.ErrnoException) => reject(err));
     http.listen(config.httpPort, config.httpHost, resolve);
+  }).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      log(
+        `端口 ${config.httpPort} 已被占用：可能已经有一个 ce-mcp --http 在跑。` +
+          `先关掉旧的（或换个端口 --port 8771）再启动。`,
+      );
+      process.exit(1);
+    }
+    throw err;
   });
   const hb = bridge.heartbeat();
   log(

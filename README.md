@@ -57,6 +57,30 @@ npm run status
 
 `npm run status` 里 `agentAlive: true` 就说明链路通了。通信用的信箱目录默认是 `D:\ce-mcp-ipc`（请求 `/req`、响应 `/res`、心跳 `/agent`）。
 
+## CE 右下角的 MCP 状态灯
+
+装好 agent 并重启 CE 后，CE 主窗口右下角会浮着一个小灯，跟着 CE 窗口走：
+
+| 显示 | 含义 |
+| --- | --- |
+| 绿色 `MCP ● 在线` | 有 MCP 服务端在跑：WorkBuddy 已连着，或者 `npm run http` 正在运行 |
+| 红色 `MCP ● 未连接` | 没有服务端：WorkBuddy 没开 / HTTP 没启动 / 超过 10 秒没收到心跳 |
+
+判断依据是服务端每 4 秒写一次的 `D:\ce-mcp-ipc\agent\bridge.txt`（带 unix 时间戳），所以：
+
+- 在 WorkBuddy 里启用 `ce-mcp`（它会拉起 stdio 进程）→ 灯变绿
+- 关掉 WorkBuddy → 进程退出 → 10 秒内变红
+- `npm run http` 启停同理；端口被占用时会直接报错退出，不会假装在线
+
+**单击状态灯**会弹出一个面板，列出当前全部 17 个 MCP 接口和各自的权限等级。清单由服务端启动时写进 `agent\tools.txt`，所以永远和 `src/mcp/tools.ts` 一致，不用手工同步。
+
+想确认灯的真实状态（不靠肉眼）：
+
+```bash
+node tools/probe.mjs 'return mcpUiDebug()'
+# visible=true rect=830,1232 112x22 caption=MCP  ● 在线 online=true why=http 模式
+```
+
 ## 接入 WorkBuddy
 
 ```bash

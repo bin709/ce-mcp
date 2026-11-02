@@ -566,6 +566,7 @@ local function tick(timer)
         string.format("v=%s\npid=%d\nce=%s\nprocess=%s\nticks=%d\ndiag=%s\ntime=%s\n",
           AGENT_VERSION, pid, tostring(cev), processNameOf(pid), tickCount, lastDiag, os.date("%Y-%m-%d %H:%M:%S")))
     end
+    if uiTick then uiTick() end
   end)
   if not ok then log("tick error: " .. tostring(e)) end
   busy = false
@@ -577,3 +578,227 @@ timer.OnTimer = tick
 timer.Enabled = true
 
 log("agent v" .. AGENT_VERSION .. " started, ipc=" .. IPC_DIR)
+
+--[[==========================================================================
+  UI：Cheat Engine 主窗口右下角的 MCP 状态灯
+  ---------------------------------------------------------------------------
+  绿灯 = MCP 服务端（Node 侧）在向 agent\bridge.txt 写心跳
+  红灯 = 没连上（服务端没启动 / 已退出 / 超过 10 秒没心跳）
+  单击状态灯 = 打开面板，列出全部 MCP 接口（清单由服务端启动时写入 agent\tools.txt）
+
+  全部 UI 操作都包在 pcall 里：CE 版本差异导致的属性缺失只会让指示灯失效，
+  绝不会让 agent 主循环挂掉。
+==========================================================================]]
+
+local UI = {
+  form = nil,
+  label = nil,
+  panel = nil,
+  memo = nil,
+  attempts = 0,
+  dead = false,
+  online = nil,
+}
+
+local BRIDGE_FILE = AGT_DIR .. [[\bridge.txt]]
+local TOOLS_FILE = AGT_DIR .. [[\tools.txt]]
+local BRIDGE_STALE_S = 10 -- 超过这个秒数没心跳就算离线
+
+--- 读取服务端心跳，返回 online, 说明
+function bridgeStatus()
+  local text = readAll(BRIDGE_FILE)
+  if not text or text == "" then return false, "服务端未启动" end
+  local kv = parseKV(text)
+  local epoch = tonumber(kv.epoch or "")
+  if not epoch then return false, "心跳缺少时间戳" end
+  local age = os.time() - epoch
+  if age < -5 then return false, "心跳时间异常" end
+  if age > BRIDGE_STALE_S then
+    return false, string.format("已 %d 秒无心跳", age)
+  end
+  return true, string.format("%s 模式", tostring(kv.mode or "?"))
+end
+
+local function toolManifest()
+  local text = readAll(TOOLS_FILE)
+  if not text or text == "" then return {}, 0 end
+  local list = {}
+  for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+    if line ~= "" then list[#list + 1] = line end
+  end
+  return list, #list
+end
+
+local function mainForm()
+  local ok, mf = pcall(getMainForm)
+  if ok and mf then return mf end
+  return nil
+end
+
+local function paint(online)
+  if not UI.label then return end
+  if online then
+    UI.label.Caption = "MCP  ● 在线"
+    pcall(function() UI.form.RGBColor = 0x1F7A3D end)
+  else
+    UI.label.Caption = "MCP  ● 未连接"
+    pcall(function() UI.form.RGBColor = 0xB4232B end)
+  end
+  pcall(function() UI.label.Font.Color = 0xFFFFFF end)
+  if UI.online ~= online then
+    UI.online = online
+    log("mcp indicator: " .. (online and "online" or "offline"))
+  end
+end
+
+local function placeBadge()
+  local mf = mainForm()
+  if not mf or not UI.form then return end
+  local vis = true
+  pcall(function() vis = mf.Visible end)
+  pcall(function()
+    UI.form.Visible = vis ~= false
+    UI.form.Left = mf.Left + mf.Width - UI.form.Width - 26
+    UI.form.Top = mf.Top + mf.Height - UI.form.Height - 48
+  end)
+end
+
+function buildUi()
+  if UI.dead or UI.form then return end
+  local ok, e = pcall(function()
+    local f = createForm(false)
+    f.Caption = "ce-mcp"
+    f.Width = 112
+    f.Height = 22
+    pcall(function() f.BorderStyle = "bsNone" end)
+    pcall(function() f.FormStyle = "fsSystemStayOnTop" end)
+
+    local l = createLabel(f)
+    l.Left = 8
+    l.Top = 4
+    l.Width = 100
+    l.Height = 16
+    l.Caption = "MCP  ● 连接中"
+    pcall(function() l.Transparent = true end)
+    pcall(function()
+      l.Font.Size = 9
+      l.Font.Style = "fsBold"
+      l.Font.Color = 0xFFFFFF
+    end)
+    pcall(function() l.Font.Color = 0xFFFFFF end)
+
+    l.OnClick = function() togglePanel() end
+    UI.form, UI.label = f, l
+    f.Visible = true
+  end)
+  if not ok then
+    log("ui build failed: " .. tostring(e))
+    UI.attempts = UI.attempts + 1
+    if UI.attempts > 6 then
+      UI.dead = true
+      log("ui disabled (CE 版本不支持这些控件属性)")
+    end
+    UI.form = nil
+    return
+  end
+  log("ui ready: 右下角指示灯")
+  UI.attempts = 0
+end
+
+function panelText()
+  local online, why = bridgeStatus()
+  local pid = currentPid()
+  local pname = processNameOf(pid)
+  if pname == "" then pname = "(未附加)" end
+  local cev = "?"
+  pcall(function() cev = getCEVersion() end)
+  local list, n = toolManifest()
+
+  local out = {
+    "ce-mcp  ——  Cheat Engine MCP 桥接  v" .. AGENT_VERSION,
+    string.rep("─", 52),
+    "服务端  " .. (online and ("在线（" .. why .. "）") or ("未连接（" .. why .. "）")),
+    "CE 版本 " .. tostring(cev) .. "      附加进程  " .. pname .. "  (pid " .. tostring(pid) .. ")",
+    "已执行  " .. tostring(tickCount) .. " 次轮询      IPC  " .. IPC_DIR,
+    "",
+    "MCP 接口（" .. tostring(n) .. " 项，服务端启动时写入）",
+    string.rep("─", 52),
+  }
+  if n == 0 then
+    out[#out + 1] = "(还没有接口清单：先启动 MCP 服务端 —— npm run http 或让 WorkBuddy 拉起)"
+  else
+    for i = 1, n do out[#out + 1] = "  " .. list[i] end
+  end
+  out[#out + 1] = ""
+  out[#out + 1] = "红色 = 服务端没连上；绿色 = 可用。本窗口可直接关掉。"
+  return table.concat(out, "\r\n")
+end
+
+function togglePanel()
+  if UI.panel then
+    pcall(function() UI.panel.Visible = not UI.panel.Visible end)
+    if UI.panel.Visible then
+      pcall(function() UI.memo.Lines.Text = panelText() end)
+      pcall(function() UI.panel.bringToFront() end)
+    end
+    return
+  end
+  local ok, e = pcall(function()
+    local p = createForm(false)
+    p.Caption = "ce-mcp —— MCP 接口"
+    p.Width = 520
+    p.Height = 460
+    pcall(function() p.Position = "poScreenCenter" end)
+    pcall(function() p.FormStyle = "fsStayOnTop" end)
+
+    local m = createMemo(p)
+    m.Left = 8
+    m.Top = 8
+    m.Width = 496
+    m.Height = 412
+    pcall(function() m.ScrollBars = "ssAutoBoth" end)
+    pcall(function() m.WordWrap = false end)
+    pcall(function()
+      m.Font.Name = "Consolas"
+      m.Font.Size = 9
+    end)
+    m.Lines.Text = panelText()
+    UI.panel, UI.memo = p, m
+    p.Visible = true
+  end)
+  if not ok then log("panel failed: " .. tostring(e)) end
+end
+
+function uiTick()
+  if UI.dead then return end
+  if not UI.form then
+    -- MainForm 在 autorun 早期可能还不存在，前几秒反复重试
+    if UI.attempts > 400 then
+      UI.dead = true
+      log("ui disabled: 等不到主窗口")
+      return
+    end
+    UI.attempts = UI.attempts + 1
+    buildUi()
+    return
+  end
+  if tickCount % 15 ~= 0 then return end -- ~450ms 刷新一次
+  local online = bridgeStatus()
+  paint(online)
+  placeBadge()
+end
+
+-- 调试用：返回指示灯的真实状态（probe 'return mcpUiDebug()' 可直接看到）
+function mcpUiDebug()
+  local online, why = bridgeStatus()
+  if not UI.form then
+    return string.format("form=nil online=%s why=%s", tostring(online), tostring(why))
+  end
+  local vis, l, t, w, h = "?", -1, -1, -1, -1
+  pcall(function() vis = tostring(UI.form.Visible) end)
+  pcall(function() l, t, w, h = UI.form.Left, UI.form.Top, UI.form.Width, UI.form.Height end)
+  local cap = "?"
+  pcall(function() cap = UI.label.Caption end)
+  return string.format("visible=%s rect=%d,%d %dx%d caption=%s online=%s why=%s panel=%s",
+    vis, l, t, w, h, cap, tostring(online), tostring(why), tostring(UI.panel ~= nil))
+end
